@@ -17,9 +17,21 @@ logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 load_dotenv()
 
+# Jira API Configuration
 JIRA_URL = os.environ.get("JIRA_URL", 'https://XX.atlassian.net/')
 JIRA_USERNAME = os.environ.get("JIRA_USERNAME", 'email')
 JIRA_PASSWORD = os.environ.get("JIRA_PASSWORD", 'api_key')
+
+# Tool Configuration
+DEFAULT_TEAM_NAME = os.environ.get("DEFAULT_TEAM_NAME", "Data Pod")
+DEFAULT_LIMIT_PRIORITY_BACKLOG = int(os.environ.get("DEFAULT_LIMIT_PRIORITY_BACKLOG", "20"))
+DEFAULT_LIMIT_ACTIVE_WORK = int(os.environ.get("DEFAULT_LIMIT_ACTIVE_WORK", "20"))
+DEFAULT_LIMIT_ACTIVE_EPICS = int(os.environ.get("DEFAULT_LIMIT_ACTIVE_EPICS", "20"))
+DEFAULT_LIMIT_RECENT_COMPLETIONS = int(os.environ.get("DEFAULT_LIMIT_RECENT_COMPLETIONS", "20"))
+DEFAULT_LIMIT_SEARCH_ISSUES = int(os.environ.get("DEFAULT_LIMIT_SEARCH_ISSUES", "50"))
+DEFAULT_LIMIT_TEAM_METRICS = int(os.environ.get("DEFAULT_LIMIT_TEAM_METRICS", "20"))
+DEFAULT_DAYS_RECENT_COMPLETIONS = int(os.environ.get("DEFAULT_DAYS_RECENT_COMPLETIONS", "7"))
+DEFAULT_DAYS_TEAM_METRICS = int(os.environ.get("DEFAULT_DAYS_TEAM_METRICS", "30"))
 
 def run_jql_query(query):
     """
@@ -93,20 +105,26 @@ mcp = FastMCP(
 # Dedicated tools for common queries
 
 @mcp.tool()
-def get_priority_backlog(team_name: str = "Data Pod", limit: int = 20) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+def get_priority_backlog(team_name: str = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
     Retrieves high-priority items (Selected for Development, New) from active epics.
     Only returns issues whose parent epic is In Progress or Backlog.
     Perfect for sprint planning and prioritization.
 
     Args:
-        team_name (str): Team name (default: "Data Pod")
-        limit (int): Maximum number of results (default: 20)
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_PRIORITY_BACKLOG environment variable)
 
     Returns:
         Union[List[Dict[str, Any]], Dict[str, str]]: List of issues or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if limit is None:
+            limit = DEFAULT_LIMIT_PRIORITY_BACKLOG
+
         query = f'status in ("Selected for Development", "New") AND assignee in (membersOf("{team_name}")) AND priority in (Highest, High) AND (parent.status = "In Progress" OR parent.status = "Backlog") ORDER BY priority DESC, created DESC'
         logger.info(f"Executing get_priority_backlog for team: {team_name}")
         result = run_jql_query(query)
@@ -120,19 +138,25 @@ def get_priority_backlog(team_name: str = "Data Pod", limit: int = 20) -> Union[
 
 
 @mcp.tool()
-def get_active_work(team_name: str = "Data Pod", limit: int = 20) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+def get_active_work(team_name: str = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
     Retrieves items currently in development (In Progress, Code Review, Testing).
     Shows what the team is actively working on right now.
 
     Args:
-        team_name (str): Team name (default: "Data Pod")
-        limit (int): Maximum number of results (default: 20)
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_ACTIVE_WORK environment variable)
 
     Returns:
         Union[List[Dict[str, Any]], Dict[str, str]]: List of issues or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if limit is None:
+            limit = DEFAULT_LIMIT_ACTIVE_WORK
+
         query = f'status in ("In Progress", "Code Review", "Testing") AND assignee in (membersOf("{team_name}")) ORDER BY priority DESC, updated DESC'
         logger.info(f"Executing get_active_work for team: {team_name}")
         result = run_jql_query(query)
@@ -146,19 +170,23 @@ def get_active_work(team_name: str = "Data Pod", limit: int = 20) -> Union[List[
 
 
 @mcp.tool()
-def get_active_epics(assignee: str = None, limit: int = 20) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+def get_active_epics(assignee: str = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
     Retrieves active epics (In Progress or Backlog).
     Useful for understanding strategic initiatives and long-term work.
 
     Args:
         assignee (str): Optional assignee filter (default: None, returns all)
-        limit (int): Maximum number of results (default: 20)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_ACTIVE_EPICS environment variable)
 
     Returns:
         Union[List[Dict[str, Any]], Dict[str, str]]: List of epics or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if limit is None:
+            limit = DEFAULT_LIMIT_ACTIVE_EPICS
+
         if assignee:
             query = f'type = Epic AND status in ("In Progress", "Backlog") AND assignee = "{assignee}" ORDER BY priority DESC, updated DESC'
             logger.info(f"Executing get_active_epics for assignee: {assignee}")
@@ -176,20 +204,28 @@ def get_active_epics(assignee: str = None, limit: int = 20) -> Union[List[Dict[s
 
 
 @mcp.tool()
-def get_recent_completions(team_name: str = "Data Pod", days: int = 7, limit: int = 20) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+def get_recent_completions(team_name: str = None, days: int = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
-    Retrieves completed work from the last N days (default 7 days for Data Pod).
+    Retrieves completed work from the last N days.
     Helps identify productivity patterns and team capacity.
 
     Args:
-        team_name (str): Team name (default: "Data Pod")
-        days (int): Number of days to look back (default: 7)
-        limit (int): Maximum number of results (default: 20)
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        days (int): Number of days to look back (default: from DEFAULT_DAYS_RECENT_COMPLETIONS environment variable)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_RECENT_COMPLETIONS environment variable)
 
     Returns:
         Union[List[Dict[str, Any]], Dict[str, str]]: List of completed issues or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if days is None:
+            days = DEFAULT_DAYS_RECENT_COMPLETIONS
+        if limit is None:
+            limit = DEFAULT_LIMIT_RECENT_COMPLETIONS
+
         query = f'resolved >= -{days}d AND assignee in (membersOf("{team_name}")) ORDER BY resolved DESC'
         logger.info(f"Executing get_recent_completions for team: {team_name}, last {days} days")
         result = run_jql_query(query)
@@ -203,19 +239,23 @@ def get_recent_completions(team_name: str = "Data Pod", days: int = 7, limit: in
 
 
 @mcp.tool()
-def search_issues(query: str, limit: int = 50) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+def search_issues(query: str, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
     Generic JQL query executor for ad-hoc searches.
     Fallback for queries beyond common patterns.
 
     Args:
         query (str): JQL query string to execute
-        limit (int): Maximum number of results (default: 50)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_SEARCH_ISSUES environment variable)
 
     Returns:
         Union[List[Dict[str, Any]], Dict[str, str]]: List of issues or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if limit is None:
+            limit = DEFAULT_LIMIT_SEARCH_ISSUES
+
         logger.info(f"Executing search_issues query: {query}")
         result = run_jql_query(query)
         result = result[:limit]
@@ -228,32 +268,38 @@ def search_issues(query: str, limit: int = 50) -> Union[List[Dict[str, Any]], Di
 
 
 @mcp.tool()
-def get_team_metrics(team_name: str = "Data Pod", days: int = 30) -> Union[Dict[str, Any], Dict[str, str]]:
+def get_team_metrics(team_name: str = None, days: int = None) -> Union[Dict[str, Any], Dict[str, str]]:
     """
     Aggregated metrics for team health dashboard.
     Shows backlog items, WIP, and recent completions.
 
     Args:
-        team_name (str): Team name (default: "Data Pod")
-        days (int): Number of days to analyze (default: 30)
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        days (int): Number of days to analyze (default: from DEFAULT_DAYS_TEAM_METRICS environment variable)
 
     Returns:
         Union[Dict[str, Any], Dict[str, str]]: Team metrics or error message
     """
     try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if days is None:
+            days = DEFAULT_DAYS_TEAM_METRICS
+
         logger.info(f"Executing get_team_metrics for team: {team_name}")
 
-        # Get backlog items (limit to 20)
+        # Get backlog items (limit to DEFAULT_LIMIT_TEAM_METRICS)
         backlog_query = f'status in ("Selected for Development", "New") AND assignee in (membersOf("{team_name}"))'
-        backlog_results = run_jql_query(backlog_query)[:20]
+        backlog_results = run_jql_query(backlog_query)[:DEFAULT_LIMIT_TEAM_METRICS]
 
-        # Get active work (limit to 20)
+        # Get active work (limit to DEFAULT_LIMIT_TEAM_METRICS)
         active_query = f'status in ("In Progress", "Code Review", "Testing") AND assignee in (membersOf("{team_name}"))'
-        active_results = run_jql_query(active_query)[:20]
+        active_results = run_jql_query(active_query)[:DEFAULT_LIMIT_TEAM_METRICS]
 
-        # Get recent completions (limit to 20)
+        # Get recent completions (limit to DEFAULT_LIMIT_TEAM_METRICS)
         completed_query = f'resolved >= -{days}d AND assignee in (membersOf("{team_name}"))'
-        completed_results = run_jql_query(completed_query)[:20]
+        completed_results = run_jql_query(completed_query)[:DEFAULT_LIMIT_TEAM_METRICS]
 
         metrics = {
             "team": team_name,
