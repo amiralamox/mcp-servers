@@ -26,3 +26,4 @@ env/
 *.log
 
 .env
+.mcp.json

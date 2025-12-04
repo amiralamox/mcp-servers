@@ -14,24 +14,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-from dotenv import load_dotenv
-load_dotenv()
-
-# Jira API Configuration
-JIRA_URL = os.environ.get("JIRA_URL", 'https://XX.atlassian.net/')
-JIRA_USERNAME = os.environ.get("JIRA_USERNAME", 'email')
-JIRA_PASSWORD = os.environ.get("JIRA_PASSWORD", 'api_key')
-
-# Tool Configuration
-DEFAULT_TEAM_NAME = os.environ.get("DEFAULT_TEAM_NAME", "Data Pod")
-DEFAULT_LIMIT_PRIORITY_BACKLOG = int(os.environ.get("DEFAULT_LIMIT_PRIORITY_BACKLOG", "20"))
-DEFAULT_LIMIT_ACTIVE_WORK = int(os.environ.get("DEFAULT_LIMIT_ACTIVE_WORK", "20"))
-DEFAULT_LIMIT_ACTIVE_EPICS = int(os.environ.get("DEFAULT_LIMIT_ACTIVE_EPICS", "20"))
-DEFAULT_LIMIT_RECENT_COMPLETIONS = int(os.environ.get("DEFAULT_LIMIT_RECENT_COMPLETIONS", "20"))
-DEFAULT_LIMIT_SEARCH_ISSUES = int(os.environ.get("DEFAULT_LIMIT_SEARCH_ISSUES", "50"))
-DEFAULT_LIMIT_TEAM_METRICS = int(os.environ.get("DEFAULT_LIMIT_TEAM_METRICS", "20"))
-DEFAULT_DAYS_RECENT_COMPLETIONS = int(os.environ.get("DEFAULT_DAYS_RECENT_COMPLETIONS", "7"))
-DEFAULT_DAYS_TEAM_METRICS = int(os.environ.get("DEFAULT_DAYS_TEAM_METRICS", "30"))
+from config import (
+    JIRA_URL,
+    JIRA_USERNAME,
+    JIRA_PASSWORD,
+    CUSTOM_FIELDS,
+    DEFAULT_TEAM_NAME,
+    DEFAULT_LIMIT_PRIORITY_BACKLOG,
+    DEFAULT_LIMIT_ACTIVE_WORK,
+    DEFAULT_LIMIT_ACTIVE_EPICS,
+    DEFAULT_LIMIT_RECENT_COMPLETIONS,
+    DEFAULT_LIMIT_SEARCH_ISSUES,
+    DEFAULT_LIMIT_TEAM_METRICS,
+    DEFAULT_LIMIT_BLOCKED_ISSUES,
+    DEFAULT_LIMIT_STALE_ISSUES,
+    DEFAULT_DAYS_RECENT_COMPLETIONS,
+    DEFAULT_DAYS_TEAM_METRICS,
+    DEFAULT_DAYS_STALE_ISSUES,
+)
 
 def run_jql_query(query):
     """
@@ -317,6 +317,76 @@ def get_team_metrics(team_name: str = None, days: int = None) -> Union[Dict[str,
         return metrics
     except Exception as e:
         error_msg = f"Error computing team metrics: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg}
+
+
+@mcp.tool()
+def get_blocked_issues(team_name: str = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Retrieves issues that are blocked by dependencies.
+    Critical for identifying bottlenecks and unblocking work.
+
+    Args:
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_BLOCKED_ISSUES environment variable)
+
+    Returns:
+        Union[List[Dict[str, Any]], Dict[str, str]]: List of blocked issues or error message
+    """
+    try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if limit is None:
+            limit = DEFAULT_LIMIT_BLOCKED_ISSUES
+
+        # Query for issues that have inward "blocks" links (are blocked by something)
+        query = f'assignee in (membersOf("{team_name}")) AND status not in (Done, Resolved, Closed) ORDER BY priority DESC, updated DESC'
+        logger.info(f"Executing get_blocked_issues for team: {team_name}")
+        result = run_jql_query(query)
+        # Filter for issues that have blockers (those with blocked_by not empty)
+        blocked_issues = [issue for issue in result if issue.get("blocked_by")]
+        blocked_issues = blocked_issues[:limit]
+        logger.info(f"Retrieved {len(blocked_issues)} blocked issues")
+        return blocked_issues
+    except Exception as e:
+        error_msg = f"Error retrieving blocked issues: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg}
+
+
+@mcp.tool()
+def get_stale_issues(team_name: str = None, days_inactive: int = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Retrieves issues that haven't been updated in N days.
+    Helps identify forgotten or abandoned work.
+
+    Args:
+        team_name (str): Team name (default: from DEFAULT_TEAM_NAME environment variable)
+        days_inactive (int): Number of days without updates (default: from DEFAULT_DAYS_STALE_ISSUES environment variable)
+        limit (int): Maximum number of results (default: from DEFAULT_LIMIT_STALE_ISSUES environment variable)
+
+    Returns:
+        Union[List[Dict[str, Any]], Dict[str, str]]: List of stale issues or error message
+    """
+    try:
+        # Use environment variables if parameters not provided
+        if team_name is None:
+            team_name = DEFAULT_TEAM_NAME
+        if days_inactive is None:
+            days_inactive = DEFAULT_DAYS_STALE_ISSUES
+        if limit is None:
+            limit = DEFAULT_LIMIT_STALE_ISSUES
+
+        query = f'assignee in (membersOf("{team_name}")) AND status not in (Done, Resolved, Closed) AND updated <= -{days_inactive}d ORDER BY updated ASC'
+        logger.info(f"Executing get_stale_issues for team: {team_name}, inactive for {days_inactive}+ days")
+        result = run_jql_query(query)
+        result = result[:limit]
+        logger.info(f"Retrieved {len(result)} stale issues")
+        return result
+    except Exception as e:
+        error_msg = f"Error retrieving stale issues: {str(e)}"
         logger.error(error_msg)
         return {"error": error_msg}
 
