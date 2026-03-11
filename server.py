@@ -391,6 +391,54 @@ def get_stale_issues(team_name: str = None, days_inactive: int = None, limit: in
         return {"error": error_msg}
 
 
+@mcp.tool()
+def get_roadmap_epics(status: str = None, limit: int = None) -> Union[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Retrieves epics from the product roadmap board, filtered by team components.
+    Maps board columns to Jira statuses: NOW=In Progress, NEXT=Backlog, LATER=New, DISCOVERY=Discovery.
+
+    Args:
+        status (str): Optional filter by board column: "now", "next", "later", "discovery", or comma-separated (default: all)
+        limit (int): Maximum number of results (default: 50)
+
+    Returns:
+        Union[List[Dict[str, Any]], Dict[str, str]]: List of epics or error message
+    """
+    try:
+        if limit is None:
+            limit = 50
+
+        # Map board columns to Jira statuses
+        column_to_status = {
+            "now": "In Progress",
+            "next": "Backlog",
+            "later": "New",
+            "discovery": "Discovery",
+        }
+
+        if status:
+            columns = [s.strip().lower() for s in status.split(",")]
+            statuses = [column_to_status[c] for c in columns if c in column_to_status]
+            if not statuses:
+                return {"error": f"Invalid status filter. Use: now, next, later, discovery"}
+        else:
+            statuses = list(column_to_status.values())
+
+        status_filter = ", ".join(f'"{s}"' for s in statuses)
+        components = 'TrackAndTrace, Optimizer, "Returns", DataService, TrackingMapping, TrackingSolver, MobileNotifications, EmailNotifications, InvoiceAnalysis'
+
+        query = f'project = PROD AND issuetype = Epic AND status in ({status_filter}) AND component in ({components}) ORDER BY status, priority DESC'
+        logger.info(f"Executing get_roadmap_epics with status filter: {status or 'all'}")
+        result = run_jql_query(query)
+        result = result[:limit]
+        logger.info(f"Retrieved {len(result)} roadmap epics")
+        return result
+    except Exception as e:
+        error_msg = f"Error retrieving roadmap epics: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg}
+
+
 # Legacy generic tool - kept for backward compatibility
 @mcp.tool()
 def jira_jql_tool(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
